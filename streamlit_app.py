@@ -14,7 +14,7 @@ from sklearn.base import clone
 from xgboost import XGBClassifier
 from lightgbm import LGBMClassifier
 
-st.set_page_config(page_title="B3 + ML Turbinada v9.2", page_icon="🚀", layout="wide")
+st.set_page_config(page_title="B3 + ML Turbinada v9.3", page_icon="🚀", layout="wide")
 
 def set_plotly_template(theme_choice: str):
     import plotly.io as pio
@@ -148,7 +148,6 @@ def time_series_cv_ensemble(X, y, future_ret, n_splits=5, test_size_min=60, seed
         if thr_method == "retorno":
             thr_fold = best_threshold_by_return(proba, rets_te)
         else:
-            from sklearn.metrics import roc_curve
             fpr, tpr, thr = roc_curve(y_te, proba); j = tpr - fpr
             thr_fold = thr[int(np.argmax(j))]
 
@@ -181,19 +180,37 @@ def max_drawdown(returns):
     dd = equity/peak - 1.0
     return float(dd.min())
 
-# Sidebar
+# -------- Sidebar (with help texts) --------
 b3 = load_b3_tickers()
 st.sidebar.header("⚙️ Configurações")
-theme_choice = st.sidebar.radio("Tema", ["Escuro", "Claro"], index=0)
+
+theme_choice = st.sidebar.radio(
+    "Tema",
+    ["Escuro", "Claro"],
+    index=0,
+    help="Muda o visual dos gráficos. Escolha 'Escuro' para ambientes com pouca luz; 'Claro' para monitores/brilho alto."
+)
 set_plotly_template(theme_choice)
 
-q = st.sidebar.text_input("Buscar empresa ou ticker", "")
+q = st.sidebar.text_input(
+    "Buscar empresa ou ticker",
+    "",
+    help="Digite o código (ex.: PETR4) ou parte do nome (ex.: Petrobras). A lista abaixo filtra conforme você digita."
+)
 res = search_b3(q) if q else b3
-ticker = st.sidebar.selectbox("Selecione o ticker", res["ticker"])
+ticker = st.sidebar.selectbox(
+    "Selecione o ticker",
+    res["ticker"],
+    help="Somente tickers da B3 (.SA). Se digitar sem .SA, o app adiciona automaticamente."
+)
 
 st.sidebar.markdown("---")
-quick = st.sidebar.selectbox("Período rápido", ["Personalizado", "6M", "1A", "YTD"], index=2)
-from datetime import date, timedelta
+quick = st.sidebar.selectbox(
+    "Período rápido",
+    ["Personalizado", "6M", "1A", "YTD"],
+    index=2,
+    help="Atalhos de data: 6 meses, 1 ano ou desde o início do ano (YTD). 'Personalizado' libera as datas abaixo."
+)
 today = date.today()
 if quick == "6M":
     start_default = today - timedelta(days=182)
@@ -203,39 +220,97 @@ elif quick == "YTD":
     start_default = date(today.year, 1, 1)
 else:
     start_default = today - timedelta(days=365)
-start = st.sidebar.date_input("Início", start_default)
-end = st.sidebar.date_input("Fim", today)
+
+start = st.sidebar.date_input("Início", start_default, help="Data inicial do histórico. Períodos maiores costumam dar modelos mais estáveis.")
+end = st.sidebar.date_input("Fim", today, help="Data final do histórico (normalmente hoje).")
 
 st.sidebar.markdown("---")
-show_sma50 = st.sidebar.checkbox("Mostrar SMA50 (médio prazo)", value=False)
-show_sma200 = st.sidebar.checkbox("Mostrar SMA200 (longo prazo)", value=False)
+st.sidebar.markdown("**Médias no gráfico:**")
+show_sma50 = st.sidebar.checkbox("Mostrar SMA50 (médio prazo)", value=False, help="Linha da média de 50 dias: ajuda a ver tendência intermediária.")
+show_sma200 = st.sidebar.checkbox("Mostrar SMA200 (longo prazo)", value=False, help="Linha da média de 200 dias: tendência principal de longo prazo.")
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("**Previsão (ML) — pesada**")
-use_ml = st.sidebar.checkbox("Ativar previsão com ML", value=False)
-horizon = st.sidebar.selectbox("Horizonte da previsão", [1,5,10], index=0)
-splits = st.sidebar.slider("Nº de divisões (walk-forward CV)", 3, 8, 5)
-test_size = st.sidebar.slider("Tamanho do bloco de teste (dias)", 20, 120, 60)
-thr_method = st.sidebar.selectbox("Método do limiar", ["Youden (acerto)", "Retorno OOS (backtest)"], index=1)
-min_prob = st.sidebar.slider("Filtro de confiança — mín. prob. para entrar (long)", 0.50, 0.70, 0.55, 0.01)
-neutral_band = st.sidebar.slider("Banda neutra (sem trade) em torno de 50%", 0.00, 0.10, 0.05, 0.01)
+use_ml = st.sidebar.checkbox(
+    "Ativar previsão com ML",
+    value=False,
+    help="Liga o ensemble (HGB/XGB/LGBM) com calibração e backtest. Exige mais processamento."
+)
+horizon = st.sidebar.selectbox(
+    "Horizonte da previsão",
+    [1,5,10],
+    index=0,
+    help="Quantos dias à frente prever a direção (↑/↓). 1=curtíssimo (mais ruído), 5=mais estável, 10=movimentos mais lentos."
+)
+splits = st.sidebar.slider(
+    "Nº de divisões (walk-forward CV)",
+    3, 8, 5, 1,
+    help="Quantas vezes o histórico será dividido para treinar/testar em sequência temporal. Mais 'splits' = avaliação mais robusta, porém mais lenta."
+)
+test_size = st.sidebar.slider(
+    "Tamanho do bloco de teste (dias)",
+    20, 120, 60, 5,
+    help="Tamanho do pedaço reservado para teste em cada divisão. 30–40 p/ 6M; 60–80 p/ ≥1A. O app ajusta automaticamente se faltar dado."
+)
+thr_method = st.sidebar.selectbox(
+    "Método do limiar",
+    ["Youden (acerto)", "Retorno OOS (backtest)"],
+    index=1,
+    help="Como escolher o ponto de corte da probabilidade em cada 'fold': 'Youden' foca em acerto/ROC; 'Retorno OOS' busca o melhor retorno no teste."
+)
+min_prob = st.sidebar.slider(
+    "Filtro de confiança — mín. prob. p/ entrar (long)",
+    0.50, 0.70, 0.55, 0.01,
+    help="Só gera sinal de compra se a probabilidade de alta for pelo menos este valor. Aumente para operar apenas quando o sinal está mais forte."
+)
+neutral_band = st.sidebar.slider(
+    "Banda neutra (sem trade) em torno de 50%",
+    0.00, 0.10, 0.05, 0.01,
+    help="Cria uma zona morta ao redor de 50%. Ex.: 0,05 = sem trade se a probabilidade ficar entre 45% e 55%."
+)
 
 st.sidebar.markdown("**Filtro de tendência**")
-use_trend = st.sidebar.checkbox("Operar long apenas se Preço > SMA200", value=True)
-allow_contrarian = st.sidebar.checkbox("Permitir contrarian em sobrevenda (RSI<30)", value=True)
-contrarian_max_dist = st.sidebar.slider("Limite de distância à SMA20 para contrarian (negativo = abaixo)", -0.15, 0.00, -0.05, 0.01)
+use_trend = st.sidebar.checkbox(
+    "Operar long apenas se Preço > SMA200",
+    value=True,
+    help="Evita operar contra a tendência de longo prazo. Só compra se o preço estiver acima da média de 200 dias."
+)
+allow_contrarian = st.sidebar.checkbox(
+    "Permitir contrarian em sobrevenda (RSI<30)",
+    value=True,
+    help="Libera compra mesmo abaixo da SMA200 somente se houver sobrevenda (RSI<30) e distância à SMA20 muito negativa (exagero de queda)."
+)
+contrarian_max_dist = st.sidebar.slider(
+    "Limite de distância à SMA20 p/ contrarian (negativo = abaixo)",
+    -0.15, 0.00, -0.05, 0.01,
+    help="Quão longe abaixo da SMA20 o preço precisa estar para permitir contrarian. Ex.: -0,05 = 5% abaixo da média de 20 dias."
+)
 
-st.title("🚀 Análise B3 + ML Turbinada — v9.2")
-st.markdown("> Ensemble calibrado + threshold configurável + filtros de estratégia + backtest com risco, e explicação dinâmica dos resultados.")
-st.caption("Somente tickers da B3 (.SA) — dados do Yahoo Finance. Objetivo educacional.")
+# -------- Title & Intro Help --------
+st.title("🚀 Análise B3 + ML Turbinada — v9.3")
+st.markdown("> Ferramenta didática com indicadores, previsão por ensemble e backtest. Todos os controles têm ajuda (passe o mouse sobre o ícone de ajuda).")
 
-# Data
+with st.expander("ℹ️ Guia rápido de uso (clique para abrir)"):
+    st.markdown("""
+**Passo a passo:**
+1) Escolha o **ticker** da B3.  
+2) Selecione um **período** (6M/1A/YTD ou personalizado).  
+3) No gráfico, ative **SMA50/SMA200** se quiser ver tendências.  
+4) Para **Previsão (ML)**, marque a caixa, ajuste **horizonte**, **splits** e **test_size**.  
+5) Escolha o **método do limiar** (acerto vs retorno), e os **filtros** (confiança, banda neutra e tendência/contrarian).  
+6) Confira as **métricas** (AUC, Brier, etc.), a **probabilidade do próximo passo** e o **backtest** (retorno, drawdown, vol).  
+7) Leia a seção **“O que os resultados dizem (dinâmico)”** para uma interpretação em linguagem simples.
+""")
+
+# -------- Data & Indicators --------
 if not is_known_b3_ticker(ticker):
     st.error("Ticker fora da lista da B3."); st.stop()
+
 with st.spinner("Baixando dados..."):
     df = fetch_data(ticker, start, end)
 if df.empty:
     st.warning("Sem dados disponíveis."); st.stop()
+
 df = add_indicators(df, want_sma50=show_sma50, want_sma200=show_sma200)
 price = float(df["Close"].iloc[-1]); sma20 = float(df["SMA20"].iloc[-1]); rsi_val = float(df["RSI14"].iloc[-1])
 delta20 = (price/sma20-1)*100 if sma20 else np.nan
@@ -265,15 +340,19 @@ def plot_rsi(df, t):
 
 plot_price(df, ticker, show_sma50, show_sma200)
 plot_rsi(df, ticker)
+
 st.info("Dica: cole PETR4, VALE3, ITUB4 etc. Sem .SA? A app adiciona automaticamente.")
 
+# -------- ML & Strategy --------
 if use_ml:
     st.markdown("---")
     st.subheader("🤖 Previsão e Estratégia")
+
     with st.spinner("Treinando e validando (walk-forward)..."):
         d, X, y, future_ret, feat_cols = build_features(df, horizon=int(horizon))
         finite_rows = np.isfinite(X).all(axis=1)
         d, X, y, future_ret = d.loc[finite_rows].reset_index(drop=True), X[finite_rows], y[finite_rows], future_ret[finite_rows]
+
         if len(X) < 80:
             st.warning("Poucos dados úteis após sanitização (NaN/Inf). Aumente o período, reduza o horizonte ou ajuste test_size/splits.")
         else:
@@ -281,6 +360,7 @@ if use_ml:
             metrics, y_prob, y_true, thresholds, last_models, oos_mask = time_series_cv_ensemble(
                 X, y, future_ret, n_splits=int(splits), test_size_min=int(test_size), thr_method=method_key
             )
+
             if isinstance(metrics, dict) and "note" in metrics and y_prob is None:
                 st.warning(metrics["note"] + " — Tente **um período maior**, **test_size menor** ou **menos splits**.")
             else:
@@ -291,11 +371,15 @@ if use_ml:
                 colD.metric("Brier", f"{metrics['brier']:.3f}")
                 colE.metric("OOS", f"{metrics['n_oos']}")
                 st.caption(f"CV ajustada: splits={metrics['adj_splits']} • test_size={metrics['adj_test_size']} • Limiar: {thr_method}")
+
+                # Próximo passo
                 proba_next = None
                 if last_models is not None and len(d) > 0:
                     x_next = d[feat_cols].values[-1:].copy()
                     proba_next = float(np.mean([m.predict_proba(x_next)[:,1] for m in last_models]))
                     st.metric(f"Prob. de alta em {horizon} dia(s)", f"{proba_next*100:.1f}%")
+
+                # Sinais com filtros
                 thr_avg = metrics["threshold_avg"]
                 prob_oos = y_prob
                 rets_oos = future_ret[oos_mask]
@@ -304,6 +388,7 @@ if use_ml:
                 neutral = (prob_oos >= low_b) & (prob_oos <= high_b)
                 sig[neutral] = 0
                 sig[prob_oos < min_prob] = 0
+
                 if use_trend:
                     px = d.loc[oos_mask, "Close"].values
                     sma200 = d.loc[oos_mask, "SMA200"].values
@@ -313,18 +398,13 @@ if use_ml:
                     contrarian = (rsi_oos < 30) & (dist20 <= contrarian_max_dist)
                     allow = above_trend | (allow_contrarian & contrarian)
                     sig = sig * allow.astype(int)
+
                 strat = rets_oos * sig
                 cum_strat = (1 + pd.Series(strat)).cumprod() - 1
                 cum_bh = (1 + pd.Series(rets_oos)).cumprod() - 1
-                def max_drawdown(returns):
-                    if len(returns) == 0:
-                        return 0.0
-                    equity = (1 + pd.Series(returns)).cumprod()
-                    peak = equity.cummax()
-                    dd = equity/peak - 1.0
-                    return float(dd.min())
                 dd_strat = max_drawdown(strat); dd_bh = max_drawdown(rets_oos)
                 vol_strat = float(np.nanstd(strat)); vol_bh = float(np.nanstd(rets_oos))
+
                 c1,c2,c3,c4,c5 = st.columns(5)
                 c1.metric("Trades (long)", f"{int(sig.sum())}")
                 c2.metric("Ret. médio/trade", f"{(np.nanmean(rets_oos[sig==1])*100 if (sig==1).any() else 0.0):.2f}%")
@@ -333,6 +413,7 @@ if use_ml:
                 c5.metric("Vol (estratégia, por passo)", f"{vol_strat*100:.2f}%")
                 st.metric("Ret. acumulado (buy & hold - OOS)", f"{float(cum_bh.iloc[-1])*100:.1f}%")
                 st.caption(f"Vol (buy & hold, por passo): {vol_bh*100:.2f}%  •  Banda neutra: ±{neutral_band*100:.0f}p.p.  •  Filtro de confiança: {min_prob*100:.0f}%")
+
                 perf_df = pd.DataFrame({
                     "Data": d.loc[oos_mask, "Date"].values,
                     "Estratégia (long nos sinais)": cum_strat.values,
@@ -340,6 +421,8 @@ if use_ml:
                 }).melt("Data", var_name="Série", value_name="Retorno Acumulado")
                 figp = px.line(perf_df, x="Data", y="Retorno Acumulado", color="Série", title="Backtest — Retorno Acumulado (fora da amostra)")
                 st.plotly_chart(figp, use_container_width=True)
+
+                # Explicação dinâmica
                 st.markdown("---")
                 st.subheader("🧠 O que os resultados dizem (dinâmico)")
                 auc = metrics['roc_auc']; brier = metrics['brier']; acc = metrics['accuracy']
@@ -362,4 +445,4 @@ if use_ml:
 - **Risco:** Máx. drawdown da estratégia = **{dd_strat*100:.1f}%**; Volatilidade por passo = **{vol_strat*100:.2f}%**.
 - **CV** usada: **splits={metrics['adj_splits']}**, **test_size={metrics['adj_test_size']}**, limiar **{thr_method}**.
                 """)
-                st.caption("Observação: resultados mudam com período, horizonte, filtros e o próprio regime do mercado. Objetivo educacional.")
+                st.caption("Observação: resultados mudam com período, horizonte, filtros e o regime do mercado. Objetivo educacional.")
