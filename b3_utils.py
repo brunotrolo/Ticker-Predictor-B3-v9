@@ -1,4 +1,3 @@
-
 import pandas as pd
 
 def load_b3_tickers():
